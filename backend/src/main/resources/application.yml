@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: cp-oa-backend
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:cp_oa}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3s
+  jackson:
+    time-zone: Asia/Shanghai
+
+shiro:
+  annotations:
+    # 本项目使用 SecurityUtils.getSubject().checkRole(...) 做运行时鉴权。
+    # 如需使用 @RequiresRoles/@RequiresPermissions 注解，改为 true 即可。
+    enabled: false
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+cp-oa:
+  jwt:
+    # 生产环境务必通过环境变量覆盖，长度至少 32 字节
+    secret: ${JWT_SECRET:cp-oa-dev-secret-change-me-0123456789abcdef}
+    expire-minutes: ${JWT_EXPIRE_MINUTES:720}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+logging:
+  level:
+    com.cpoa: debug
