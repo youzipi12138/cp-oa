@@ -4,6 +4,8 @@ import { defineConfig } from 'vite';
 
 // https://vite.dev/config/
 export default defineConfig({
+  // 部署到子路径时通过 VITE_BASE_PATH 指定，例如 /cp-oa/
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react()],
   resolve: {
     alias: {

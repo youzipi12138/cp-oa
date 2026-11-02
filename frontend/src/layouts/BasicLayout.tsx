@@ -53,7 +53,13 @@ export default function BasicLayout() {
   return (
     <ProLayout
       title="CP OA"
-      logo={<img src="/favicon.svg" alt="CP OA" style={{ width: 28, height: 28 }} />}
+      logo={
+        <img
+          src={`${import.meta.env.BASE_URL}favicon.svg`}
+          alt="CP OA"
+          style={{ width: 28, height: 28 }}
+        />
+      }
       layout="mix"
       fixedHeader
       fixSiderbar

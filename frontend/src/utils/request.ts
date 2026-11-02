@@ -3,8 +3,11 @@ import axios, { type AxiosRequestConfig } from 'axios';
 import type { Result } from '@/types';
 import { clearAuth, getToken } from './auth';
 
+const basePath = import.meta.env.BASE_URL;
+const loginPath = `${basePath}login`;
+
 const service = axios.create({
-  baseURL: '/api',
+  baseURL: `${basePath}api`,
   timeout: 15000,
 });
 
@@ -31,9 +34,9 @@ service.interceptors.response.use(
 
     if (status === 401) {
       clearAuth();
-      if (window.location.pathname !== '/login') {
+      if (window.location.pathname !== loginPath) {
         message.warning('登录已失效，请重新登录');
-        window.location.href = '/login';
+        window.location.href = loginPath;
       }
     } else {
       message.error(msg || error.message || '网络异常，请稍后重试');

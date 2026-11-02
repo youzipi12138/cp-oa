@@ -32,7 +32,9 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
         <LoginForm<LoginParams>
-          logo={<img src="/favicon.svg" alt="CP OA" style={{ height: 40 }} />}
+          logo={
+            <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="CP OA" style={{ height: 40 }} />
+          }
           title="CP OA"
           subTitle="企业办公自动化系统"
           initialValues={{ username: 'admin' }}
