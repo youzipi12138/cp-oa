@@ -1,4 +1,5 @@
 import {
+  ApartmentOutlined,
   BellOutlined,
   DashboardOutlined,
   LogoutOutlined,
@@ -17,6 +18,7 @@ const menuRoute = {
   path: '/',
   routes: [
     { path: '/dashboard', name: '工作台', icon: <DashboardOutlined /> },
+    { path: '/org', name: '组织架构', icon: <ApartmentOutlined /> },
     { path: '/users', name: '用户管理', icon: <TeamOutlined /> },
   ],
 };

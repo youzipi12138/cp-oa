@@ -7,6 +7,7 @@ import BasicLayout from '@/layouts/BasicLayout';
 import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
 import NotFound from '@/pages/NotFound';
+import OrgPage from '@/pages/Org';
 import UserPage from '@/pages/User';
 import ProtectedRoute from '@/router/ProtectedRoute';
 
@@ -30,6 +31,7 @@ export default function App() {
             <Route element={<BasicLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/org" element={<OrgPage />} />
               <Route path="/users" element={<UserPage />} />
             </Route>
           </Route>

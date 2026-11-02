@@ -25,6 +25,12 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
    mysql -uroot -p < sql/schema.sql
    ```
 
+   已有的 `cp_oa` 库升级组织架构表时执行一次：
+
+   ```bash
+   mysql -uroot -p < sql/upgrade_org.sql
+   ```
+
 2. 启动 Redis 与 MySQL（默认 `localhost:6379`、`localhost:3306`）。
 
 3. 启动应用：
@@ -45,11 +51,17 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
 | `DB_NAME` | `cp_oa` | 数据库名 |
 | `DB_USERNAME` / `DB_PASSWORD` | `root` / `root` | 数据库账号 |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis 地址 |
+| `REDIS_USERNAME` | 空 | Redis ACL 用户名（如 `default`） |
 | `REDIS_PASSWORD` | 空 | Redis 密码 |
 | `REDIS_DATABASE` | `0` | Redis 库 |
 | `JWT_SECRET` | 内置开发密钥 | 至少 32 字节，生产必须覆盖 |
 | `JWT_EXPIRE_MINUTES` | `720` | Token 有效期（分钟） |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | 允许的前端来源，逗号分隔 |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 允许的前端来源，逗号分隔 |
+| `FEISHU_ENABLED` | `true` | 是否启用飞书组织架构同步 |
+| `FEISHU_APP_ID` | `cli_aa6da0336df8dc06` | 飞书应用 App ID |
+| `FEISHU_APP_SECRET` | 空 | 飞书应用 App Secret，必须通过环境变量注入 |
+| `FEISHU_BASE_URL` | `https://open.feishu.cn` | 飞书开放平台地址 |
+| `FEISHU_SYNC_CRON` | `0 30 2 * * *` | 组织架构定时同步 cron |
 
 ## 认证与授权流程
 
@@ -76,8 +88,40 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
 | POST | `/api/users` | 新建用户 | admin |
 | PUT | `/api/users/{id}` | 更新用户 | admin |
 | DELETE | `/api/users/{id}` | 删除用户（逻辑删除） | admin |
+| GET | `/api/org/tree` | 本地部门树 | 登录 |
+| GET | `/api/org/departments/{id}/users` | 部门成员 | 登录 |
+| POST | `/api/org/sync` | 手动全量同步飞书组织架构 | admin |
 
 统一响应：`{ "code": 0, "message": "ok", "data": ... }`，`code != 0` 表示失败。
+
+## 飞书组织架构同步
+
+同步使用**应用身份** `tenant_access_token` 调用飞书通讯录接口，需要开通以下权限
+（应用身份）：
+
+- `contact:contact.base:readonly` 获取通讯录基本信息
+- `contact:department.base:readonly` 获取部门基础信息
+- `contact:department.organize:readonly` 获取通讯录部门组织架构信息
+- `contact:user.department:readonly` 获取用户组织架构信息
+
+应用在飞书后台的**通讯录权限范围**需覆盖要同步的部门；同步全员需选择全员范围。
+权限与配置修改后，需要在飞书后台**创建版本并发布**才会生效。
+
+同步逻辑：
+
+1. `GET /open-apis/contact/v3/departments?parent_department_id=0&fetch_child=true`
+   拉取全部部门，按 `open_department_id` upsert 到 `sys_department`，并回填本地父子关系。
+2. 逐部门调用 `/open-apis/contact/v3/users/find_by_department` 拉取直属成员，
+   按 `open_id` upsert 到 `sys_user`（匹配不到时按手机号/邮箱匹配已有账号，
+   仍不存在则创建 `role=user` 的账号）。
+3. 用本次同步的部门集合重建 `sys_user_department` 关系。
+4. 定时任务按 `FEISHU_SYNC_CRON` 执行；管理员也可在组织架构页面点击「立即同步」。
+
+说明：
+
+- 飞书同步创建的用户使用随机密码，只能通过飞书登录（飞书登录后续接入）。
+- 已逻辑删除的飞书用户再次同步时会被自动恢复，避免唯一键冲突。
+- 用户被移出某部门后，其旧的部门关系会在下次同步时清理；离职用户状态会被置为禁用。
 
 ## 目录结构
 
@@ -85,12 +129,14 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
 src/main/java/com/cpoa/
 ├── common/      # 统一响应、异常、Redis Key
 ├── config/      # Shiro、CORS、MyBatis-Plus、JWT 配置
-├── controller/  # 登录、用户、健康检查
-├── dto/         # 请求参数
+├── controller/  # 登录、用户、组织架构、健康检查
+├── dto/         # 请求参数 / 同步结果
 ├── entity/      # 数据库实体
+├── feishu/      # 飞书开放平台客户端
 ├── mapper/      # MyBatis-Plus Mapper
+├── scheduler/   # 定时同步任务
 ├── security/    # JWT 工具、Realm、Filter、凭证匹配器
-├── service/     # 业务逻辑
+├── service/     # 业务逻辑、组织架构同步
 └── vo/          # 响应对象
 ```
 

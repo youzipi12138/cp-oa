@@ -17,6 +17,7 @@ export interface UserInfo {
   realName: string;
   email?: string;
   phone?: string;
+  employeeNo?: string;
   role: 'admin' | 'user';
   status: number;
   createTime?: string;

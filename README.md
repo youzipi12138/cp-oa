@@ -15,7 +15,8 @@ cp-oa/
 - React 19、Vite 7、TypeScript 5.9
 - Ant Design 5 + `@ant-design/pro-components`（ProLayout、ProTable、LoginForm）
 - React Router 7、Axios
-- 已实现：登录、ProLayout 主框架、工作台、用户管理（分页/搜索/新建/编辑/删除）
+- 已实现：登录、ProLayout 主框架、工作台、组织架构（部门树/成员/手动同步）、
+  用户管理（分页/搜索/新建/编辑/删除）
 
 ### 后端
 
@@ -24,6 +25,8 @@ cp-oa/
 - MyBatis-Plus 3.5.18（分页、逻辑删除、字段自动填充）
 - MySQL 8、Redis 6+
 - JWT（jjwt）+ Redis Token 白名单，BCrypt 密码加密
+- 飞书通讯录同步：全量部门/成员 → 本地 `sys_department`、`sys_user`、
+  `sys_user_department`，支持定时与手动同步
 
 ## 快速开始
 
@@ -35,15 +38,23 @@ cp-oa/
 mysql -uroot -p < backend/sql/schema.sql
 ```
 
+已有数据库升级组织架构相关表：
+
+```bash
+mysql -uroot -p < backend/sql/upgrade_org.sql
+```
+
 ### 2. 启动后端
 
 ```bash
 cd backend
-mvn spring-boot:run
+FEISHU_APP_SECRET=你的飞书AppSecret mvn spring-boot:run
 ```
 
-后端地址 <http://localhost:8080>。数据库/Redis 连接信息可通过环境变量覆盖，见
+后端地址 <http://localhost:8080>。数据库、Redis、飞书应用的连接信息均通过环境变量覆盖，见
 [`backend/README.md`](backend/README.md#配置项)。
+
+飞书组织架构同步需要先在飞书开放平台开通应用身份通讯录权限，并**创建版本发布**后生效。
 
 ### 3. 启动前端
 

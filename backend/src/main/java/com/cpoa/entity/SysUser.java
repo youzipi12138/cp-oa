@@ -29,6 +29,14 @@ public class SysUser {
 
     private String phone;
 
+    /** 飞书 open_id（应用内唯一） */
+    private String feishuOpenId;
+
+    /** 飞书 union_id（开发者内唯一） */
+    private String feishuUnionId;
+
+    private String employeeNo;
+
     /** admin / user */
     private String role;
 

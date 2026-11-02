@@ -13,6 +13,7 @@ public class UserVO {
     private String realName;
     private String email;
     private String phone;
+    private String employeeNo;
     private String role;
     private Integer status;
 
