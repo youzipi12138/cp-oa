@@ -1,6 +1,7 @@
 package com.cpoa.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.cpoa.common.BusinessException;
 import com.cpoa.config.FeishuProperties;
 import com.cpoa.dto.OrgSyncResult;
@@ -47,6 +48,10 @@ public class OrgSyncService {
     private final PasswordEncoder passwordEncoder;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
+    public boolean isRunning() {
+        return running.get();
+    }
+
     public OrgSyncResult syncAll() {
         if (!feishuProperties.isEnabled()) {
             throw new BusinessException("飞书同步未启用");
@@ -66,10 +71,15 @@ public class OrgSyncService {
             }
 
             Map<String, SysDepartment> departments = upsertDepartments(departmentNodes);
+            int departmentsRemoved = feishuProperties.isCleanupMissing()
+                    ? removeMissingDepartments(departments.keySet())
+                    : 0;
+
             Map<String, SysUser> syncedUsers = new LinkedHashMap<>();
             Map<String, Set<Long>> userDepartments = new HashMap<>();
             int usersCreated = 0;
             int usersUpdated = 0;
+            int fetchFailures = 0;
 
             for (SysDepartment department : departments.values()) {
                 if (department.getStatus() == null || department.getStatus() == 0) {
@@ -81,6 +91,7 @@ public class OrgSyncService {
                     users = feishuClient.listDepartmentUsers(department.getFeishuDepartmentId());
                 } catch (BusinessException e) {
                     // 根部门或部分部门不在权限范围内时跳过，不影响其它部门
+                    fetchFailures++;
                     log.warn("拉取部门[{}]成员失败: {}", department.getName(), e.getMessage());
                     continue;
                 }
@@ -108,9 +119,18 @@ public class OrgSyncService {
             }
 
             int relations = replaceUserDepartments(syncedUsers, userDepartments);
+            // 有部门成员拉取失败时无法判断用户是否真的离开，跳过用户清理避免误禁用
+            int usersDisabled = 0;
+            if (fetchFailures > 0) {
+                log.warn("有 {} 个部门成员拉取失败，跳过离职用户清理", fetchFailures);
+            } else if (feishuProperties.isCleanupMissing()) {
+                usersDisabled = disableMissingUsers(syncedUsers.keySet());
+            }
+
             long duration = System.currentTimeMillis() - start;
             OrgSyncResult result = new OrgSyncResult(
-                    departments.size(), usersCreated, usersUpdated, relations, duration);
+                    departments.size(), departmentsRemoved, usersCreated, usersUpdated,
+                    usersDisabled, relations, duration);
             log.info("飞书组织架构同步完成: {}", result);
             return result;
         } finally {
@@ -132,9 +152,12 @@ public class OrgSyncService {
                 continue;
             }
 
-            SysDepartment department = departmentMapper.selectOne(
-                    new LambdaQueryWrapper<SysDepartment>()
-                            .eq(SysDepartment::getFeishuDepartmentId, feishuId));
+            SysDepartment department = departmentMapper.selectByFeishuIdIncludingDeleted(feishuId);
+            if (department != null && Integer.valueOf(1).equals(department.getDeleted())) {
+                // 部门曾在飞书侧删除后又被恢复，同步时一并恢复本地记录
+                departmentMapper.restoreById(department.getId());
+                department.setDeleted(0);
+            }
             boolean created = department == null;
             if (created) {
                 department = new SysDepartment();
@@ -173,9 +196,11 @@ public class OrgSyncService {
     }
 
     private SysDepartment ensureRootDepartment() {
-        SysDepartment root = departmentMapper.selectOne(
-                new LambdaQueryWrapper<SysDepartment>()
-                        .eq(SysDepartment::getFeishuDepartmentId, ROOT_FEISHU_ID));
+        SysDepartment root = departmentMapper.selectByFeishuIdIncludingDeleted(ROOT_FEISHU_ID);
+        if (root != null && Integer.valueOf(1).equals(root.getDeleted())) {
+            departmentMapper.restoreById(root.getId());
+            root.setDeleted(0);
+        }
         if (root == null) {
             root = new SysDepartment();
             root.setFeishuDepartmentId(ROOT_FEISHU_ID);
@@ -275,6 +300,55 @@ public class OrgSyncService {
             }
         }
         return relations;
+    }
+
+    /**
+     * 逻辑删除飞书侧已不存在的部门（根部门除外），并清理其成员关系。
+     */
+    private int removeMissingDepartments(Set<String> existingFeishuIds) {
+        List<SysDepartment> missing = departmentMapper.selectList(null).stream()
+                .filter(department -> !ROOT_FEISHU_ID.equals(department.getFeishuDepartmentId()))
+                .filter(department -> !existingFeishuIds.contains(department.getFeishuDepartmentId()))
+                .toList();
+        if (missing.isEmpty()) {
+            return 0;
+        }
+
+        List<Long> ids = missing.stream().map(SysDepartment::getId).toList();
+        userDepartmentMapper.delete(
+                new LambdaQueryWrapper<SysUserDepartment>()
+                        .in(SysUserDepartment::getDepartmentId, ids));
+        departmentMapper.deleteByIds(ids);
+        log.info("清理飞书侧已删除的部门 {} 个", ids.size());
+        return ids.size();
+    }
+
+    /**
+     * 禁用本次同步未出现过的飞书用户（视为离职或被移出通讯录），并清理其部门关系。
+     * 管理员账号不做自动禁用，避免误操作导致无法登录管理后台。
+     */
+    private int disableMissingUsers(Set<String> syncedOpenIds) {
+        List<SysUser> missing = userMapper.selectList(
+                        new LambdaQueryWrapper<SysUser>()
+                                .isNotNull(SysUser::getFeishuOpenId)
+                                .ne(SysUser::getRole, "admin"))
+                .stream()
+                .filter(user -> !syncedOpenIds.contains(user.getFeishuOpenId()))
+                .filter(user -> !Integer.valueOf(0).equals(user.getStatus()))
+                .toList();
+        if (missing.isEmpty()) {
+            return 0;
+        }
+
+        List<Long> ids = missing.stream().map(SysUser::getId).toList();
+        userDepartmentMapper.delete(
+                new LambdaQueryWrapper<SysUserDepartment>()
+                        .in(SysUserDepartment::getUserId, ids));
+        userMapper.update(null, new LambdaUpdateWrapper<SysUser>()
+                .in(SysUser::getId, ids)
+                .set(SysUser::getStatus, 0));
+        log.info("禁用飞书侧已离职/移除的用户 {} 个", ids.size());
+        return ids.size();
     }
 
     private SysUser findByContact(String mobile, String email) {

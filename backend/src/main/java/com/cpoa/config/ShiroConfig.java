@@ -65,6 +65,8 @@ public class ShiroConfig {
         DefaultShiroFilterChainDefinition chain = new DefaultShiroFilterChainDefinition();
         chain.addPathDefinition("/api/auth/login", "anon");
         chain.addPathDefinition("/api/health", "anon");
+        // 飞书事件回调由飞书服务器直接访问，使用 Verification Token / 签名校验来源
+        chain.addPathDefinition("/api/org/feishu/events", "anon");
         chain.addPathDefinition("/error", "anon");
         chain.addPathDefinition("/favicon.ico", "anon");
         chain.addPathDefinition("/**", "jwtFilter");

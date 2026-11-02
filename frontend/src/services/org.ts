@@ -11,8 +11,10 @@ export interface DepartmentNode {
 
 export interface OrgSyncResult {
   departments: number;
+  departmentsRemoved: number;
   usersCreated: number;
   usersUpdated: number;
+  usersDisabled: number;
   relations: number;
   durationMs: number;
 }

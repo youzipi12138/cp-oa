@@ -50,6 +50,14 @@ cp-oa:
     app-secret: ${FEISHU_APP_SECRET:}
     base-url: ${FEISHU_BASE_URL:https://open.feishu.cn}
     sync-cron: "${FEISHU_SYNC_CRON:0 30 2 * * *}"
+    # 事件订阅的 Verification Token，未配置时不接收事件回调
+    verification-token: ${FEISHU_VERIFICATION_TOKEN:}
+    # 事件订阅的 Encrypt Key，配置后启用签名校验与报文解密
+    encrypt-key: ${FEISHU_ENCRYPT_KEY:}
+    # 同步时清理飞书侧已删除的部门、禁用已离职/移除的用户
+    cleanup-missing: ${FEISHU_CLEANUP_MISSING:true}
+    # 事件触发的去抖窗口（毫秒），窗口内的事件合并为一次同步
+    sync-debounce-ms: ${FEISHU_SYNC_DEBOUNCE_MS:3000}
 
 logging:
   level:

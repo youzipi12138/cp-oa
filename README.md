@@ -26,7 +26,7 @@ cp-oa/
 - MySQL 8、Redis 6+
 - JWT（jjwt）+ Redis Token 白名单，BCrypt 密码加密
 - 飞书通讯录同步：全量部门/成员 → 本地 `sys_department`、`sys_user`、
-  `sys_user_department`，支持定时与手动同步
+  `sys_user_department`，支持定时、手动与事件订阅实时同步
 
 ## 快速开始
 
@@ -55,6 +55,9 @@ FEISHU_APP_SECRET=你的飞书AppSecret mvn spring-boot:run
 [`backend/README.md`](backend/README.md#配置项)。
 
 飞书组织架构同步需要先在飞书开放平台开通应用身份通讯录权限，并**创建版本发布**后生效。
+如需通讯录变更实时同步，还需配置事件订阅（请求地址 `/api/org/feishu/events`、
+`FEISHU_VERIFICATION_TOKEN` 等），详见
+[`backend/README.md`](backend/README.md#事件订阅实时同步)。
 
 ### 3. 启动前端
 

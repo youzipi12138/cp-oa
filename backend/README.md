@@ -62,6 +62,10 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
 | `FEISHU_APP_SECRET` | 空 | 飞书应用 App Secret，必须通过环境变量注入 |
 | `FEISHU_BASE_URL` | `https://open.feishu.cn` | 飞书开放平台地址 |
 | `FEISHU_SYNC_CRON` | `0 30 2 * * *` | 组织架构定时同步 cron |
+| `FEISHU_VERIFICATION_TOKEN` | 空 | 事件订阅 Verification Token，配置后才接收事件回调 |
+| `FEISHU_ENCRYPT_KEY` | 空 | 事件订阅 Encrypt Key，配置后启用签名校验与报文解密 |
+| `FEISHU_CLEANUP_MISSING` | `true` | 同步时清理已删除部门、禁用已离职/移除的用户 |
+| `FEISHU_SYNC_DEBOUNCE_MS` | `3000` | 事件触发的去抖窗口（毫秒） |
 
 ## 认证与授权流程
 
@@ -91,6 +95,7 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
 | GET | `/api/org/tree` | 本地部门树 | 登录 |
 | GET | `/api/org/departments/{id}/users` | 部门成员 | 登录 |
 | POST | `/api/org/sync` | 手动全量同步飞书组织架构 | admin |
+| POST | `/api/org/feishu/events` | 飞书事件订阅回调 | 匿名（验签） |
 
 统一响应：`{ "code": 0, "message": "ok", "data": ... }`，`code != 0` 表示失败。
 
@@ -115,13 +120,41 @@ Spring Boot 4 + Apache Shiro 3 + MyBatis-Plus + MySQL + Redis。
    按 `open_id` upsert 到 `sys_user`（匹配不到时按手机号/邮箱匹配已有账号，
    仍不存在则创建 `role=user` 的账号）。
 3. 用本次同步的部门集合重建 `sys_user_department` 关系。
-4. 定时任务按 `FEISHU_SYNC_CRON` 执行；管理员也可在组织架构页面点击「立即同步」。
+4. 飞书侧已不存在的部门会被逻辑删除并清理成员关系；本次未出现过的飞书用户
+   会被禁用并清理部门关系（管理员账号不会被自动禁用）。
+   只要有部门成员拉取失败，本次就跳过用户清理，避免误禁用。
+5. 定时任务按 `FEISHU_SYNC_CRON` 兜底执行；管理员也可在组织架构页面点击「立即同步」；
+   配置事件订阅后，通讯录变更会实时触发同步。
 
 说明：
 
 - 飞书同步创建的用户使用随机密码，只能通过飞书登录（飞书登录后续接入）。
-- 已逻辑删除的飞书用户再次同步时会被自动恢复，避免唯一键冲突。
+- 已逻辑删除的飞书部门/用户再次同步时会被自动恢复，避免唯一键冲突。
 - 用户被移出某部门后，其旧的部门关系会在下次同步时清理；离职用户状态会被置为禁用。
+- 清理（`FEISHU_CLEANUP_MISSING=true`，默认开启）依赖同步能拿到全量通讯录，
+  因此权限范围必须是**全员**；只授权了部分部门时请关闭该开关，否则范围外的部门和用户会被误清理。
+- 管理员账号（`role=admin`）不会被自动禁用，避免同步异常导致无法登录后台。
+
+### 事件订阅（实时同步）
+
+在飞书开放平台「事件与回调 → 事件配置」中：
+
+1. 请求地址填 `https://你的域名/api/org/feishu/events`（需公网可达）。
+2. 将后台生成的 **Verification Token** 配置到 `FEISHU_VERIFICATION_TOKEN`；
+   如启用了 **Encrypt Key**，同时配置 `FEISHU_ENCRYPT_KEY`。
+3. 添加通讯录事件：`contact.department.created_v3`、`contact.department.updated_v3`、
+   `contact.department.deleted_v3`、`contact.user.created_v3`、`contact.user.updated_v3`、
+   `contact.user.deleted_v3` 等（所有 `contact.` 开头的事件都会被识别）。
+4. 发布应用版本后生效。
+
+回调处理逻辑：
+
+- 配置 Encrypt Key 时按 `SHA256(timestamp + nonce + encrypt_key + body)` 校验签名，
+  并按 `AES-256-CBC` 解密报文；随后校验 Verification Token。
+- 飞书配置请求地址时的 `url_verification` 会原样返回 `challenge`。
+- 按 `event_id` 在 Redis 做 10 分钟幂等去重（`cp-oa:feishu:event:{id}`）。
+- 事件只作为「有变更」的信号，默认合并 3 秒内的多次事件后异步执行一次全量同步，
+  不做逐条增量更新；同步失败会记录日志，定时任务仍会兜底。
 
 ## 目录结构
 

@@ -94,7 +94,9 @@ export default function OrgPage() {
     try {
       const result = await syncOrg();
       message.success(
-        `同步完成：部门 ${result.departments} 个，新增用户 ${result.usersCreated} 个，更新 ${result.usersUpdated} 个，关系 ${result.relations} 条`,
+        `同步完成：部门 ${result.departments} 个（清理 ${result.departmentsRemoved} 个），` +
+          `新增用户 ${result.usersCreated} 个，更新 ${result.usersUpdated} 个，` +
+          `禁用 ${result.usersDisabled} 个，关系 ${result.relations} 条`,
       );
       await loadTree();
       if (selectedDept != null) {
