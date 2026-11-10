@@ -1,0 +1,133 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build backend
+        run: mvn -B -f backend/pom.xml -DskipTests package
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          # 前端部署在 https://<host>/cp-oa/ 子路径
+          VITE_BASE_PATH: /cp-oa/
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Upload backend jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/cp-oa-backend-*.jar
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    name: Deploy to 175
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download backend jar
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: artifacts/backend
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: artifacts/frontend
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ] || [ -z "${DEPLOY_USER:-}" ]; then
+            echo "::error::缺少 DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_KEY，请在仓库 Settings → Secrets and variables → Actions 中配置"
+            exit 1
+          fi
+          port="${DEPLOY_PORT:-22}"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/cp_oa_deploy
+          chmod 600 ~/.ssh/cp_oa_deploy
+          ssh-keyscan -p "$port" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host cp-oa"
+            echo "  HostName $DEPLOY_HOST"
+            echo "  User $DEPLOY_USER"
+            echo "  Port $port"
+            echo "  IdentityFile ~/.ssh/cp_oa_deploy"
+            echo "  IdentitiesOnly yes"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Upload artifacts to server
+        run: |
+          set -euo pipefail
+          ssh cp-oa 'mkdir -p /opt/cp-oa/incoming'
+          scp -q artifacts/backend/*.jar cp-oa:/opt/cp-oa/incoming/cp-oa-backend.jar
+          rsync -az --delete artifacts/frontend/ cp-oa:/opt/cp-oa/incoming/dist/
+          scp -q deploy/deploy.sh cp-oa:/opt/cp-oa/deploy.sh
+          ssh cp-oa 'chmod 755 /opt/cp-oa/deploy.sh'
+
+      - name: Deploy
+        run: |
+          ssh cp-oa "bash /opt/cp-oa/deploy.sh '${{ github.sha }}'"
