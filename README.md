@@ -87,18 +87,24 @@ pnpm dev
 
 ## CI/CD 自动部署
 
-推送到 `main` 或手动触发 `CI/CD` workflow 后，GitHub Actions 会：
+推送到 `main`（或手动触发 `CI/CD` workflow）后，GitHub Actions 分为两个 job：
 
-1. 构建后端：`mvn -DskipTests package` → `cp-oa-backend-0.1.0.jar`；
-2. 构建前端：`pnpm install --frozen-lockfile && pnpm build`（`VITE_BASE_PATH=/cp-oa/`）；
-3. 通过 SSH 把产物上传到 `ubuntu@49.233.89.175`，执行 `deploy/deploy.sh`：
+1. **Build**（GitHub 托管运行器）：`mvn -DskipTests package` +
+   `pnpm install --frozen-lockfile && pnpm build`（`VITE_BASE_PATH=/cp-oa/`），
+   用于验证代码可构建；PR 也只跑这一段。
+2. **Deploy**：通过 SSH 在 `ubuntu@49.233.89.175` 上拉取同一个 commit，
+   执行 `deploy/build.sh` → `deploy/deploy.sh`：
+   - 服务器本地构建后端 jar 与前端 dist（Maven/pnpm 缓存已预热，约 30 秒）；
    - 备份旧 jar → 覆盖挂载文件 → `docker restart cp-oa-backend` → 轮询
      `http://127.0.0.1:8081/api/health`，失败自动回滚上一版；
    - 前端 dist 先写入 `/var/www/cp-oa.new`，校验通过后原子切换到
      `/var/www/cp-oa`，旧目录保留为 `/var/www/cp-oa.prev`。
 
+> 为什么部署时要在服务器重建：GitHub 运行器在境外，直传 56MB 的 jar 到腾讯云实测只有
+> 十几 KB/s；服务器从 GitHub 拉取 <1MB 源码只需数秒，且有预热缓存。
+
 workflow 定义见 [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)，
-服务器端脚本见 [`deploy/deploy.sh`](deploy/deploy.sh)。
+服务器端脚本见 [`deploy/build.sh`](deploy/build.sh) 与 [`deploy/deploy.sh`](deploy/deploy.sh)。
 
 ### GitHub Secrets
 
@@ -115,7 +121,8 @@ workflow 定义见 [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)�
 
 | 路径 / 端口 | 用途 |
 | --- | --- |
-| `/opt/cp-oa/incoming/` | Actions 上传的待部署产物 |
+| `/opt/cp-oa/repo/` | 服务器上的 git 检出，部署时拉取并构建 |
+| `/opt/cp-oa/incoming/` | 服务器构建出的待安装产物 |
 | `/opt/cp-oa/backups/` | 后端 jar 备份，保留最近 5 份 |
 | `/opt/cp-oa/backend/target/cp-oa-backend-0.1.0.jar` | 容器 bind mount 的 jar |
 | `/opt/cp-oa/RELEASE` | 最近一次部署的 commit 与时间 |

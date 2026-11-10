@@ -75,23 +75,8 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download backend jar
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-jar
-          path: artifacts/backend
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: artifacts/frontend
-
       - name: Configure SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -116,18 +101,28 @@ jobs:
             echo "  Port $port"
             echo "  IdentityFile ~/.ssh/cp_oa_deploy"
             echo "  IdentitiesOnly yes"
+            echo "  ConnectTimeout 20"
+            echo "  ServerAliveInterval 15"
+            echo "  ServerAliveCountMax 4"
           } > ~/.ssh/config
           chmod 600 ~/.ssh/config
 
-      - name: Upload artifacts to server
+      # 运行器在境外，直传 56MB 的 jar 只有十几 KB/s，改用「服务器拉源码 + 本机构建」。
+      # CI 的 build job 已用同一 commit 完整构建验证过。
+      - name: Build and deploy on server
         run: |
+          ssh cp-oa "bash -s -- '${{ github.sha }}'" <<'REMOTE'
           set -euo pipefail
-          ssh cp-oa 'mkdir -p /opt/cp-oa/incoming'
-          scp -q artifacts/backend/*.jar cp-oa:/opt/cp-oa/incoming/cp-oa-backend.jar
-          rsync -az --delete artifacts/frontend/ cp-oa:/opt/cp-oa/incoming/dist/
-          scp -q deploy/deploy.sh cp-oa:/opt/cp-oa/deploy.sh
-          ssh cp-oa 'chmod 755 /opt/cp-oa/deploy.sh'
-
-      - name: Deploy
-        run: |
-          ssh cp-oa "bash /opt/cp-oa/deploy.sh '${{ github.sha }}'"
+          SHA="$1"
+          REPO=/opt/cp-oa/repo
+          if [ ! -d "$REPO/.git" ]; then
+            rm -rf "$REPO"
+            git clone --depth 1 --no-tags https://github.com/youzipi12138/cp-oa.git "$REPO"
+          fi
+          cd "$REPO"
+          if ! git cat-file -e "$SHA^{commit}" 2>/dev/null; then
+            git fetch --depth 1 origin "$SHA" || git fetch --depth 1 origin main
+          fi
+          git reset --hard "$SHA"
+          bash deploy/build.sh "$SHA"
+          REMOTE
